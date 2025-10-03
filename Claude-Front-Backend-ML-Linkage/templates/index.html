@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wine Classification AI</title>
+    <!--
+    FRONTEND-BACKEND CONNECTION POINT #1: Static Files
+    Flask automatically serves files from static/ folder at /static/ URL
+    This CSS link connects to static/style.css via Flask's static file serving
+    -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🍷 Wine Classification AI</h1>
+            <p>Enter wine characteristics to predict wine class using machine learning</p>
+        </header>
+
+        <!--
+        FRONTEND-BACKEND CONNECTION POINT #2: Dynamic Form Generation
+        This form is generated using Flask's template engine (Jinja2)
+        - The 'features' variable is passed from app.py route function
+        - Jinja2 for loop creates input fields for each wine feature
+        - This ensures frontend form matches backend model expectations
+        -->
+        <form id="wineForm" class="wine-form">
+            <div class="form-grid">
+                {% for feature in features %}
+                <div class="form-group">
+                    <!--
+                    FRONTEND INPUT FIELD EXPLANATION:
+                    - 'name' attribute corresponds to backend WINE_FEATURES list
+                    - 'id' allows JavaScript to access this field
+                    - 'required' ensures all fields are filled before submission
+                    - Feature names are converted to readable labels (replace underscores)
+                    -->
+                    <label for="{{ feature }}">{{ feature.replace('_', ' ').title() }}</label>
+                    <input
+                        type="number"
+                        id="{{ feature }}"
+                        name="{{ feature }}"
+                        step="any"
+                        required
+                        placeholder="Enter {{ feature.replace('_', ' ') }} value"
+                    >
+                </div>
+                {% endfor %}
+            </div>
+
+            <!--
+            FRONTEND-BACKEND CONNECTION POINT #3: Form Submission
+            This button triggers JavaScript that:
+            1. Collects all form data
+            2. Sends POST request to /predict endpoint
+            3. Displays backend response to user
+            -->
+            <button type="submit" class="submit-btn" id="submitBtn">
+                🔬 Predict Wine Class
+            </button>
+        </form>
+
+        <!-- Sample data section to help users understand expected input -->
+        <div class="sample-section">
+            <h3>📊 Sample Data</h3>
+            <p>Try these example values for a typical wine:</p>
+            <button type="button" class="sample-btn" onclick="fillSampleData()">
+                📝 Fill Sample Data
+            </button>
+            <div class="sample-values">
+                <small>
+                    Alcohol: 14.23, Malic Acid: 1.71, Ash: 2.43, Alcalinity: 15.6,
+                    Magnesium: 127, Total Phenols: 2.8, Flavanoids: 3.06,
+                    Nonflavanoid Phenols: 0.28, Proanthocyanins: 2.29,
+                    Color Intensity: 5.64, Hue: 1.04, OD280/OD315: 3.92, Proline: 1065
+                </small>
+            </div>
+        </div>
+
+        <!--
+        FRONTEND-BACKEND CONNECTION POINT #4: Results Display
+        This section displays the JSON response from the backend /predict endpoint
+        JavaScript populates these elements with prediction results
+        -->
+        <div id="results" class="results" style="display: none;">
+            <h3>🎯 Prediction Results</h3>
+            <div class="result-card">
+                <div class="predicted-class">
+                    <strong>Predicted Class:</strong>
+                    <span id="predictedClass" class="class-badge"></span>
+                </div>
+                <div class="confidence">
+                    <strong>Confidence:</strong>
+                    <span id="confidence"></span>
+                </div>
+                <div class="probabilities">
+                    <strong>All Class Probabilities:</strong>
+                    <div id="allProbabilities" class="prob-list"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Error display section -->
+        <div id="error" class="error" style="display: none;">
+            <h3>❌ Error</h3>
+            <p id="errorMessage"></p>
+        </div>
+
+        <!-- Loading indicator -->
+        <div id="loading" class="loading" style="display: none;">
+            <div class="spinner"></div>
+            <p>🤖 AI is analyzing your wine characteristics...</p>
+        </div>
+    </div>
+
+    <!--
+    FRONTEND-BACKEND CONNECTION POINT #5: JavaScript Integration
+    This script handles all frontend-backend communication:
+    1. Form submission handling
+    2. API calls to Flask backend
+    3. Response processing and display
+    -->
+    <script>
+        // SAMPLE DATA FUNCTIONALITY
+        // ========================
+        // This function demonstrates the exact input format expected by the model
+        function fillSampleData() {
+            // Sample wine data from the model documentation
+            const sampleData = {
+                'alcohol': 14.23,
+                'malic_acid': 1.71,
+                'ash': 2.43,
+                'alcalinity_of_ash': 15.6,
+                'magnesium': 127,
+                'total_phenols': 2.8,
+                'flavanoids': 3.06,
+                'nonflavanoid_phenols': 0.28,
+                'proanthocyanins': 2.29,
+                'color_intensity': 5.64,
+                'hue': 1.04,
+                'od280/od315_of_diluted_wines': 3.92,
+                'proline': 1065
+            };
+
+            // Fill form fields with sample data
+            for (const [feature, value] of Object.entries(sampleData)) {
+                const input = document.getElementById(feature);
+                if (input) {
+                    input.value = value;
+                }
+            }
+        }
+
+        // MAIN FORM SUBMISSION HANDLER
+        // ============================
+        document.getElementById('wineForm').addEventListener('submit', async function(e) {
+            // Prevent default form submission (which would reload the page)
+            e.preventDefault();
+
+            // FRONTEND DATA COLLECTION
+            // =======================
+            // Collect all form data into a JavaScript object
+            const formData = new FormData(this);
+            const data = {};
+
+            // Convert FormData to plain object for JSON serialization
+            for (const [key, value] of formData.entries()) {
+                data[key] = value;
+            }
+
+            console.log('Sending data to backend:', data);
+
+            // UI STATE MANAGEMENT
+            // ==================
+            // Show loading state and hide previous results
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('results').style.display = 'none';
+            document.getElementById('error').style.display = 'none';
+            document.getElementById('submitBtn').disabled = true;
+
+            try {
+                // FRONTEND-BACKEND API COMMUNICATION
+                // =================================
+                // Send POST request to Flask /predict endpoint
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        // This header tells Flask we're sending JSON data
+                    },
+                    body: JSON.stringify(data)  // Convert JavaScript object to JSON string
+                });
+
+                // BACKEND RESPONSE PROCESSING
+                // ==========================
+                // Parse JSON response from Flask backend
+                const result = await response.json();
+                console.log('Received response from backend:', result);
+
+                if (!response.ok) {
+                    // Handle HTTP errors (4xx, 5xx status codes)
+                    throw new Error(result.error || 'Prediction failed');
+                }
+
+                // SUCCESS: DISPLAY PREDICTION RESULTS
+                // ==================================
+                // Show results section
+                document.getElementById('results').style.display = 'block';
+
+                // Display predicted class with styling
+                const classElement = document.getElementById('predictedClass');
+                classElement.textContent = result.predicted_class;
+                classElement.className = `class-badge ${result.predicted_class}`;
+
+                // Display confidence percentage
+                document.getElementById('confidence').textContent =
+                    `${(result.confidence * 100).toFixed(2)}%`;
+
+                // Display all class probabilities
+                const probContainer = document.getElementById('allProbabilities');
+                probContainer.innerHTML = '';
+
+                for (const [className, probability] of Object.entries(result.all_probabilities)) {
+                    const probElement = document.createElement('div');
+                    probElement.className = 'prob-item';
+                    probElement.innerHTML = `
+                        <span class="class-name">${className}:</span>
+                        <span class="prob-value">${(probability * 100).toFixed(2)}%</span>
+                        <div class="prob-bar">
+                            <div class="prob-fill" style="width: ${probability * 100}%"></div>
+                        </div>
+                    `;
+                    probContainer.appendChild(probElement);
+                }
+
+            } catch (error) {
+                // ERROR HANDLING
+                // =============
+                console.error('Prediction error:', error);
+                document.getElementById('error').style.display = 'block';
+                document.getElementById('errorMessage').textContent = error.message;
+            } finally {
+                // CLEANUP
+                // =======
+                // Hide loading state and re-enable submit button
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('submitBtn').disabled = false;
+            }
+        });
+
+        // PAGE LOAD INITIALIZATION
+        // =======================
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Wine Classification AI loaded successfully');
+            console.log('Form ready for input');
+        });
+    </script>
+</body>
+</html>
