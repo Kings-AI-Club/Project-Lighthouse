@@ -9,6 +9,7 @@ import streamlit as st
 import numpy as np
 import logging
 from typing import Optional, Tuple, Dict
+import os
 
 # Lightweight top-level config
 logging.basicConfig(level=logging.INFO)
@@ -19,58 +20,130 @@ WINE_FEATURES = [
     'total_phenols', 'flavanoids', 'nonflavanoid_phenols', 'proanthocyanins',
     'color_intensity', 'hue', 'od280/od315_of_diluted_wines', 'proline'
 ]
-WINE_CLASSES = ['class_0', 'class_1', 'class_2']
+WINE_CLASSES = ['Class 0', 'Class 1', 'Class 2']
 
-# Example data for testing
-# Load from external file
-def load_example_data():
-    """Load example data from sample-data.txt file"""
+# Feature ranges from the Wine dataset (for slider bounds and normalization reference)
+FEATURE_RANGES = {
+    'alcohol': (0.0, 15.0),
+    'malic_acid': (0.0, 6.0),
+    'ash': (0.0, 3.5),
+    'alcalinity_of_ash': (0.0, 30.0),
+    'magnesium': (0.0, 170.0),
+    'total_phenols': (0.0, 4.0),
+    'flavanoids': (0.0, 5.5),
+    'nonflavanoid_phenols': (0.0, 1.0),
+    'proanthocyanins': (0.0, 4.0),
+    'color_intensity': (0.0, 13.0),
+    'hue': (0.0, 2.0),
+    'od280/od315_of_diluted_wines': (0.0, 4.5),
+    'proline': (0.0, 1700.0)
+}
+
+# Feature descriptions
+FEATURE_DESCRIPTIONS = {
+    'alcohol': 'Alcohol content (%)',
+    'malic_acid': 'Malic acid (g/L)',
+    'ash': 'Ash content (g/L)',
+    'alcalinity_of_ash': 'Alkalinity of ash',
+    'magnesium': 'Magnesium (mg/L)',
+    'total_phenols': 'Total phenols',
+    'flavanoids': 'Flavanoids',
+    'nonflavanoid_phenols': 'Non-flavanoid phenols',
+    'proanthocyanins': 'Proanthocyanins',
+    'color_intensity': 'Color intensity',
+    'hue': 'Hue',
+    'od280/od315_of_diluted_wines': 'OD280/OD315 ratio',
+    'proline': 'Proline (mg/L)'
+}
+
+
+def load_sample_data():
+    """Load sample data from sample-data.txt file"""
     try:
         with open('sample-data.txt', 'r') as f:
-            data_str = f.read().strip()
-            # Parse comma-separated values
-            values = [float(x.strip()) for x in data_str.split(',')]
-            if len(values) != 13:
-                logger.error(f"Example data has {len(values)} values, expected 13")
-                return None
-            return values
+            lines = f.readlines()
+        
+        x_data = None
+        for i, line in enumerate(lines):
+            if line.strip().startswith('X:'):
+                data_line_idx = i + 2
+                if data_line_idx < len(lines):
+                    data_line = lines[data_line_idx].strip()
+                else:
+                    logger.error("No data line found after X:")
+                    return None
+                
+                if data_line:
+                    values = [float(x.strip()) for x in data_line.split(',')]
+                    if len(values) != 13:
+                        logger.error(f"Sample data has {len(values)} values, expected 13")
+                        return None
+                    x_data = values
+                    break
+        
+        if x_data is None:
+            logger.error("Could not find X: data in sample-data.txt")
+            return None
+            
+        return x_data
+        
     except FileNotFoundError:
         logger.warning("sample-data.txt not found")
         return None
     except Exception as e:
-        logger.error(f"Error loading example data: {e}")
+        logger.error(f"Error loading sample data: {e}")
         return None
 
 
-def load_model() -> Optional[object]:
-    """
-    Lazy-load your Keras model. Import heavy libraries inside this function
-    to avoid Streamlit watcher threading + native-extension initialization issues.
-    Returns the model or None on failure.
-    """
+@st.cache_resource
+def get_scaler():
+    """Load or create a StandardScaler for feature normalization"""
     try:
-        # Import heavy libs here
-        # The 'model' module should provide ThreeClassFNN
-        from model import ThreeClassFNN  # local file in same project
-        # Import TensorFlow/Keras only now
-        import tensorflow as tf  # noqa: F401
+        from sklearn.preprocessing import StandardScaler
+        from sklearn.datasets import load_wine
+        
+        # Load wine dataset to fit scaler
+        wine_data = load_wine()
+        scaler = StandardScaler()
+        scaler.fit(wine_data.data)
+        logger.info("Scaler fitted on wine dataset")
+        return scaler
+    except Exception as e:
+        logger.warning(f"Could not create scaler: {e}")
+        return None
+
+
+def normalize_features(features: np.ndarray, scaler) -> np.ndarray:
+    """Normalize features using the provided scaler"""
+    if scaler is None:
+        return features
+    try:
+        return scaler.transform(features)
+    except Exception as e:
+        logger.warning(f"Normalization failed: {e}")
+        return features
+
+
+def load_model() -> Optional[object]:
+    """Lazy-load Keras model"""
+    try:
+        from model import ThreeClassFNN
+        import tensorflow as tf
         
         model = ThreeClassFNN()
-        model.build((None, 13))  # Input shape: (batch_size, 13 features)
+        model.build((None, 13))
         model.load_weights('model/wine.weights.h5')
         logger.info("Weights loaded successfully")
         
-        # Verify model architecture by doing a test prediction
-        # This ensures the model is fully initialized
         test_input = np.zeros((1, 13))
         _ = model.predict(test_input, verbose=0)
-        logger.info(f"Model expects input shape: (None, 13)")
-        logger.info(f"Model output shape: (None, 3)")
         logger.info("Model loaded and warmed up successfully.")
         return model
     except Exception as exc:
-        logger.error(f"Error loading model: {exc}")
+        logger.error(f"Error loading model: {exc}", exc_info=True)
         logger.warning("Running in demo mode - predictions will use mock data")
+        st.session_state['model_error'] = str(exc)
+        st.session_state['model_error_traceback'] = __import__('traceback').format_exc()
         return None
 
 
@@ -81,204 +154,308 @@ def get_model():
 
 
 def predict_with_model(model, input_array: np.ndarray) -> np.ndarray:
-    """Predict using the provided model, or raise."""
+    """Predict using the provided model"""
     return model.predict(input_array, verbose=0)
 
 
 def get_mock_prediction() -> np.ndarray:
-    """Return deterministic mock predictions for demo/fallback."""
-    # Create realistic-looking mock predictions
-    return np.array([[0.2, 0.7, 0.1]])  # Favor class_1
+    """Return deterministic mock predictions for demo/fallback"""
+    return np.array([[0.0, 1.0, 0.0]])  # 100% Class 1
 
 
 # ---------- Streamlit UI ----------
-st.set_page_config(page_title="Wine Classification AI", layout="centered")
+st.set_page_config(
+    page_title="Wine Classification AI",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-st.title("Wine Classification AI (Streamlit)")
-st.write("Enter wine characteristics below and click **Predict**.")
+# Custom CSS for better styling
+st.markdown("""
+<style>
+    .main-header {
+        text-align: center;
+        padding: 1rem 0 2rem 0;
+    }
+    .prediction-box {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 2rem;
+        border-radius: 10px;
+        color: white;
+        text-align: center;
+        margin: 1rem 0;
+    }
+    .metric-card {
+        background: #f8f9fa;
+        padding: 1rem;
+        border-radius: 8px;
+        border-left: 4px solid #667eea;
+    }
+    .stMetric {
+        background: white;
+        padding: 1rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+</style>
+""", unsafe_allow_html=True)
 
-# Sidebar / developer tools
+# Header
+st.markdown("<div class='main-header'>", unsafe_allow_html=True)
+st.title("🍷 Wine Classification AI")
+st.markdown("*Powered by Deep Learning & Scikit-Learn*")
+st.markdown("</div>", unsafe_allow_html=True)
+
+# Sidebar
 with st.sidebar:
-    st.header("Developer")
-    st.write("Model loader status and debug controls.")
-    if st.button("Reload model"):
-        # Clear cache then load (workaround: re-run by calling get_model with clear_cache)
-        st.cache_resource.clear()
-        _ = get_model()
-        st.rerun()
-    st.write("Python & environment info:")
-    st.code({
-        "python_version": "".join(map(str, __import__("sys").version.splitlines())),
-    })
-
-# Example Data Button
-st.subheader("Quick Test")
-if st.button("Fill Example Data", use_container_width=True, type="secondary"):
-    example_data = load_example_data()
-    if example_data:
-        for i, value in enumerate(example_data):
-            st.session_state[f"feat_{i}"] = float(value)
-        st.rerun()
-    else:
-        st.error("Could not load example data. Create a file named 'sample-data.txt' with 13 comma-separated values.")
-
-st.divider()
-
-# Form inputs (use number_input for numeric validation)
-with st.form("wine_form"):
-    st.subheader("Wine Characteristics")
-    cols = st.columns(2)
-    inputs = []
-    for i, feature in enumerate(WINE_FEATURES):
-        col = cols[i % 2]
-        # Get value from session state if available, otherwise default to 0.0
-        default_value = st.session_state.get(f"feat_{i}", 0.0)
-        
-        # Don't use key inside form - it causes state conflicts
-        # The form will manage its own state
-        value = col.number_input(
-            label=feature.replace('_', ' ').capitalize(),
-            value=float(default_value),
-            format="%.6f",
-            step=0.1
-        )
-        inputs.append(value)
-    submitted = st.form_submit_button("Predict", use_container_width=True, type="primary")
-
-# Show model load status
-model = get_model()
-if model is None:
-    st.warning("⚠️ Model not loaded — running in demo mode (mock predictions).")
-else:
-    st.success("✅ Model loaded successfully.")
-
-# Perform prediction when submitted
-if submitted:
-    try:
-        # FRONTEND DATA VALIDATION
-        # ========================
-        # Validate all inputs before processing
-        for i, (feature, value) in enumerate(zip(WINE_FEATURES, inputs)):
-            try:
-                float_value = float(value)
-                if not np.isfinite(float_value):
-                    raise ValueError(f"Value must be a finite number")
-            except (ValueError, TypeError) as e:
-                st.error(f"❌ Invalid value for {feature}: {value}")
-                logger.error(f"Validation error for {feature}: {e}")
-                st.stop()
-
-        # FRONTEND-BACKEND DATA TRANSFORMATION
-        # ===================================
-        # Reshape for model input: model expects shape (batch_size, 13)
-        input_array = np.array([inputs], dtype=float)  # Shape: (1, 13)
-        logger.info(f"Model input shape: {input_array.shape}")
-        logger.info(f"Model input values: {input_array}")
-        
-        st.divider()
-        st.subheader("📊 Prediction Results")
-        
-        # Show input summary
-        with st.expander("View Input Features", expanded=False):
-            input_dict = dict(zip(WINE_FEATURES, inputs))
-            st.json(input_dict)
-            st.caption(f"Input shape: {input_array.shape}")
-
-        # MODEL PREDICTION
-        # ===============
-        if model is None:
-            # DEMO MODE: Generate mock predictions when model unavailable
-            predictions = get_mock_prediction()
-            logger.warning("Using mock predictions - model not loaded")
-            logger.info("Using mock predictions for demonstration")
-        else:
-            # Generate prediction using the loaded model
-            # model.predict() returns probability scores for each class
-            predictions = predict_with_model(model, input_array)
-            logger.info(f"Raw model predictions: {predictions}")
-
-        # Ensure predictions shape is as expected
-        if predictions is None:
-            raise RuntimeError("Model returned no predictions.")
-        predictions = np.asarray(predictions)
-        if predictions.ndim != 2 or predictions.shape[1] != len(WINE_CLASSES):
-            # Try to reshape/truncate if model returned vector
-            if predictions.ndim == 1 and predictions.shape[0] == len(WINE_CLASSES):
-                predictions = predictions.reshape(1, -1)
-            else:
-                raise RuntimeError(f"Unexpected prediction shape: {predictions.shape}")
-
-        # Convert predictions to interpretable format
-        predicted_class_index = int(np.argmax(predictions[0]))  # Index of highest probability
-        predicted_class = WINE_CLASSES[predicted_class_index]  # Human-readable class name
-        confidence = float(predictions[0][predicted_class_index])  # Confidence score
-
-        # Display main prediction with confidence
-        st.success(f"### 🎯 Predicted Class: **{predicted_class}**")
-        st.metric("Confidence", f"{confidence:.2%}")
-        
-        # Display all probabilities
-        st.write("#### All Class Probabilities:")
-        probs = {WINE_CLASSES[i]: float(predictions[0][i]) for i in range(len(WINE_CLASSES))}
-        
-        # Create columns for probability display
-        prob_cols = st.columns(3)
-        for i, (class_name, prob) in enumerate(probs.items()):
-            with prob_cols[i]:
-                st.metric(
-                    label=class_name,
-                    value=f"{prob:.2%}",
-                    delta=None
-                )
-        
-        # Detailed probability breakdown
-        with st.expander("Detailed Probability Breakdown"):
-            st.json(probs)
-            st.bar_chart(probs)
-        
-        logger.info(f"Prediction complete: {predicted_class} (confidence: {confidence:.2f})")
-
-    except Exception as e:
-        logger.exception("Prediction error")
-        st.error(f"❌ **Prediction error:** {str(e)}")
-        st.write("Please check your inputs and try again.")
-
-# Provide additional info and troubleshooting tips
-with st.expander("ℹ️ About This App"):
-    st.write("""
-    **Model Details:**
-    - Input Features (13): alcohol, malic_acid, ash, alcalinity_of_ash, magnesium,
-      total_phenols, flavanoids, nonflavanoid_phenols, proanthocyanins,
-      color_intensity, hue, od280/od315_of_diluted_wines, proline
-    - Output Classes (3): class_0, class_1, class_2 (wine quality/type categories)
-    - Architecture: TensorFlow/Keras neural network for wine classification
+    st.header("⚙️ Settings")
     
-    **Technical Notes:**
-    - Create a file named `sample-data.txt` in the same directory with 13 comma-separated values
-    - Example format: `14.23, 1.71, 2.43, 15.6, 127.0, 2.8, 3.06, 0.28, 2.29, 5.64, 1.04, 3.92, 1065.0`
-    - The model is loaded lazily to avoid issues with native C/C++ extensions during Streamlit's watcher threads.
-    - If you get a crash on startup, run a minimal app to test Streamlit:
-      ```
-      cat > hello.py <<'PY'
-      import streamlit as st
-      st.write('hello')
-      PY
-      streamlit run hello.py
-      ```
-    - If minimal app crashes, create a clean conda environment (recommended on macOS) with Python 3.11 and install packages from conda-forge:
-      ```
-      conda create -n st-env python=3.11 -y
-      conda activate st-env
-      conda config --set channel_priority strict
-      conda install -c conda-forge streamlit numpy -y
-      # and if you need TF:
-      conda install -c conda-forge tensorflow -y
-      streamlit run streamlit_app.py
-      ```
-    """)
+    # Normalization toggle
+    use_normalization = st.toggle(
+        "Use Feature Normalization",
+        value=True,
+        help="Normalize features using StandardScaler fitted on the Wine dataset"
+    )
+    
+    st.divider()
+    
+    # Model status
+    st.subheader("📊 Model Status")
+    model = get_model()
+    scaler = get_scaler() if use_normalization else None
+    
+    if model is not None:
+        st.success("✅ Model loaded")
+    else:
+        st.error("❌ Model unavailable")
+    
+    if use_normalization:
+        if scaler is not None:
+            st.success("✅ Scaler active")
+        else:
+            st.warning("⚠️ Scaler unavailable")
+    
+    st.divider()
+    
+    # Developer tools
+    with st.expander("🔧 Developer Tools"):
+        if st.button("Reload Model", use_container_width=True):
+            st.cache_resource.clear()
+            st.rerun()
+        
+        st.code(f"Python {__import__('sys').version.split()[0]}")
+        
+        # File system check
+        st.write("**Files:**")
+        st.write(f"📁 CWD: `{os.getcwd()}`")
+        st.write(f"{'✅' if os.path.exists('model.py') else '❌'} model.py")
+        st.write(f"{'✅' if os.path.exists('model/wine.weights.h5') else '❌'} wine.weights.h5")
+        
+        # Show error if model failed
+        if model is None and 'model_error' in st.session_state:
+            with st.expander("Error Details"):
+                st.error(st.session_state['model_error'])
+                st.code(st.session_state['model_error_traceback'])
+    
+    st.divider()
+    
+    # Info
+    with st.expander("ℹ️ About"):
+        st.write("""
+        This app classifies wines into three categories based on chemical properties.
+        
+        **Features:**
+        - 13 chemical measurements
+        - Deep learning classification
+        - StandardScaler normalization
+        - Real-time predictions
+        """)
 
-# Show last model load traceback (if failed)
-if model is None:
-    with st.expander("⚠️ Model Load Logs"):
-        st.write("Model failed to load. Check your local `model.py`, `model/wine.weights.h5` and TensorFlow installation.")
-        st.info("The app will continue to run with mock predictions for demonstration purposes.")
+# Main content area
+col_left, col_right = st.columns([2, 1])
+
+with col_left:
+    st.subheader("🔬 Wine Characteristics")
+    
+    # Quick test buttons
+    button_cols = st.columns(3)
+    with button_cols[0]:
+        if st.button("📋 Load Sample", use_container_width=True):
+            sample_data = load_sample_data()
+            if sample_data:
+                for i, value in enumerate(sample_data):
+                    st.session_state[f"feat_{i}"] = float(value)
+                st.rerun()
+            else:
+                st.error("Sample data file not found")
+    
+    with button_cols[1]:
+        if st.button("🔄 Reset All", use_container_width=True):
+            for i in range(len(WINE_FEATURES)):
+                st.session_state[f"feat_{i}"] = 0.0
+            st.rerun()
+    
+    with button_cols[2]:
+        if st.button("🎲 Random", use_container_width=True):
+            for i, feature in enumerate(WINE_FEATURES):
+                min_val, max_val = FEATURE_RANGES[feature]
+                st.session_state[f"feat_{i}"] = float(np.random.uniform(min_val, max_val))
+            st.rerun()
+    
+    st.divider()
+    
+    # Feature inputs with sliders
+    with st.form("wine_form"):
+        inputs = []
+        
+        # Create tabs for organized input
+        tab1, tab2, tab3 = st.tabs(["🍇 Composition", "🎨 Color & Taste", "🧪 Advanced"])
+        
+        with tab1:
+            # First set of features
+            for i, feature in enumerate(WINE_FEATURES[:5]):
+                default_value = st.session_state.get(f"feat_{i}", 0.0)
+                min_val, max_val = FEATURE_RANGES[feature]
+                
+                value = st.slider(
+                    FEATURE_DESCRIPTIONS[feature],
+                    min_value=float(min_val),
+                    max_value=float(max_val),
+                    value=float(default_value),
+                    step=(max_val - min_val) / 100,
+                    format="%.2f"
+                )
+                inputs.append(value)
+        
+        with tab2:
+            # Second set of features
+            for i, feature in enumerate(WINE_FEATURES[5:10], start=5):
+                default_value = st.session_state.get(f"feat_{i}", 0.0)
+                min_val, max_val = FEATURE_RANGES[feature]
+                
+                value = st.slider(
+                    FEATURE_DESCRIPTIONS[feature],
+                    min_value=float(min_val),
+                    max_value=float(max_val),
+                    value=float(default_value),
+                    step=(max_val - min_val) / 100,
+                    format="%.2f"
+                )
+                inputs.append(value)
+        
+        with tab3:
+            # Last set of features
+            for i, feature in enumerate(WINE_FEATURES[10:], start=10):
+                default_value = st.session_state.get(f"feat_{i}", 0.0)
+                min_val, max_val = FEATURE_RANGES[feature]
+                
+                value = st.slider(
+                    FEATURE_DESCRIPTIONS[feature],
+                    min_value=float(min_val),
+                    max_value=float(max_val),
+                    value=float(default_value),
+                    step=(max_val - min_val) / 100,
+                    format="%.2f"
+                )
+                inputs.append(value)
+        
+        submitted = st.form_submit_button("🎯 Classify Wine", use_container_width=True, type="primary")
+
+with col_right:
+    st.subheader("📊 Results")
+    
+    # Prediction results
+    if submitted:
+        try:
+            # Validate inputs
+            for i, (feature, value) in enumerate(zip(WINE_FEATURES, inputs)):
+                if not np.isfinite(value):
+                    st.error(f"Invalid value for {feature}")
+                    st.stop()
+            
+            # Prepare input
+            input_array = np.array([inputs], dtype=float)
+            logger.info(f"Raw input: {input_array}")
+            
+            # Normalize if enabled
+            if use_normalization and scaler is not None:
+                normalized_array = normalize_features(input_array, scaler)
+                logger.info(f"Normalized input: {normalized_array}")
+                prediction_input = normalized_array
+            else:
+                prediction_input = input_array
+            
+            # Make prediction
+            if model is None:
+                predictions = get_mock_prediction()
+                st.warning("⚠️ Using mock predictions")
+            else:
+                predictions = predict_with_model(model, prediction_input)
+                logger.info(f"Predictions: {predictions}")
+            
+            predictions = np.asarray(predictions)
+            if predictions.ndim == 1:
+                predictions = predictions.reshape(1, -1)
+            
+            # Get results
+            predicted_class_index = int(np.argmax(predictions[0]))
+            predicted_class = WINE_CLASSES[predicted_class_index]
+            confidence = float(predictions[0][predicted_class_index])
+            
+            # Display prediction
+            st.markdown(f"""
+            <div class='prediction-box'>
+                <h2>🎯 {predicted_class}</h2>
+                <h3>{confidence:.1%} Confidence</h3>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Probability visualization
+            st.write("**Class Probabilities:**")
+            
+            # Bar chart
+            import pandas as pd
+            prob_data = pd.DataFrame({
+                'Class': WINE_CLASSES,
+                'Probability': [float(predictions[0][i]) for i in range(len(WINE_CLASSES))]
+            })
+            st.bar_chart(prob_data.set_index('Class'), color='#667eea', height=200)
+            
+            # Progress bars
+            for i, class_name in enumerate(WINE_CLASSES):
+                prob = float(predictions[0][i])
+                st.progress(prob, text=f"{class_name}: {prob:.1%}")
+            
+            # Detailed metrics
+            with st.expander("📈 Detailed Analysis"):
+                st.json({
+                    "Predicted Class": predicted_class,
+                    "Confidence": f"{confidence:.4f}",
+                    "All Probabilities": {
+                        WINE_CLASSES[i]: f"{float(predictions[0][i]):.4f}"
+                        for i in range(len(WINE_CLASSES))
+                    },
+                    "Normalized": use_normalization
+                })
+                
+                # Feature summary
+                st.write("**Input Features:**")
+                st.dataframe({
+                    "Feature": [FEATURE_DESCRIPTIONS[f] for f in WINE_FEATURES],
+                    "Value": [f"{v:.2f}" for v in inputs]
+                }, use_container_width=True)
+        
+        except Exception as e:
+            logger.exception("Prediction error")
+            st.error(f"❌ Error: {str(e)}")
+    else:
+        st.info("👈 Enter wine characteristics and click **Classify Wine** to get predictions")
+        
+        # Show example
+        st.write("**Example Values:**")
+        st.code("""
+Alcohol: 13.2%
+Malic Acid: 2.3 g/L
+Ash: 2.4 g/L
+...
+        """)
