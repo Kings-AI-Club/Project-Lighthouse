@@ -10,134 +10,137 @@ import numpy as np
 import logging
 from typing import Optional, Tuple, Dict
 import os
+import pickle
 
 # Lightweight top-level config
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-WINE_FEATURES = [
-    'alcohol', 'malic_acid', 'ash', 'alcalinity_of_ash', 'magnesium',
-    'total_phenols', 'flavanoids', 'nonflavanoid_phenols', 'proanthocyanins',
-    'color_intensity', 'hue', 'od280/od315_of_diluted_wines', 'proline'
+# Feature definitions for homelessness risk model
+# Order: Gender, Age, Drug, Mental, Indigenous, DV, ACT, NSW, NT, QLD, SA, TAS, VIC, WA, SHS_Client
+FEATURE_NAMES = [
+    'Gender', 'Age', 'Drug', 'Mental', 'Indigenous', 'DV',
+    'ACT', 'NSW', 'NT', 'QLD', 'SA', 'TAS', 'VIC', 'WA',
+    'SHS_Client'
 ]
-WINE_CLASSES = ['Class 0', 'Class 1', 'Class 2']
 
-# Feature ranges from the Wine dataset (for slider bounds and normalization reference)
-FEATURE_RANGES = {
-    'alcohol': (0.0, 15.0),
-    'malic_acid': (0.0, 6.0),
-    'ash': (0.0, 3.5),
-    'alcalinity_of_ash': (0.0, 30.0),
-    'magnesium': (0.0, 170.0),
-    'total_phenols': (0.0, 4.0),
-    'flavanoids': (0.0, 5.5),
-    'nonflavanoid_phenols': (0.0, 1.0),
-    'proanthocyanins': (0.0, 4.0),
-    'color_intensity': (0.0, 13.0),
-    'hue': (0.0, 2.0),
-    'od280/od315_of_diluted_wines': (0.0, 4.5),
-    'proline': (0.0, 1700.0)
-}
+BINARY_FEATURES = ['Gender', 'Drug', 'Mental', 'Indigenous', 'DV', 'SHS_Client']
+LOCATION_FEATURES = ['ACT', 'NSW', 'NT', 'QLD', 'SA', 'TAS', 'VIC', 'WA']
 
 # Feature descriptions
 FEATURE_DESCRIPTIONS = {
-    'alcohol': 'Alcohol content (%)',
-    'malic_acid': 'Malic acid (g/L)',
-    'ash': 'Ash content (g/L)',
-    'alcalinity_of_ash': 'Alkalinity of ash',
-    'magnesium': 'Magnesium (mg/L)',
-    'total_phenols': 'Total phenols',
-    'flavanoids': 'Flavanoids',
-    'nonflavanoid_phenols': 'Non-flavanoid phenols',
-    'proanthocyanins': 'Proanthocyanins',
-    'color_intensity': 'Color intensity',
-    'hue': 'Hue',
-    'od280/od315_of_diluted_wines': 'OD280/OD315 ratio',
-    'proline': 'Proline (mg/L)'
+    'Gender': 'Gender (0: Female, 1: Male)',
+    'Age': 'Age in years',
+    'Drug': 'Drug use risk factor',
+    'Mental': 'Mental health risk factor',
+    'Indigenous': 'Indigenous status',
+    'DV': 'Domestic violence risk factor',
+    'Location': 'Australian state/territory',
+    'SHS_Client': 'Specialist Homelessness Services client'
 }
-
-
-def load_sample_data():
-    """Load sample data from sample-data.txt file"""
-    try:
-        with open('sample-data.txt', 'r') as f:
-            lines = f.readlines()
-        
-        x_data = None
-        for i, line in enumerate(lines):
-            if line.strip().startswith('X:'):
-                data_line_idx = i + 2
-                if data_line_idx < len(lines):
-                    data_line = lines[data_line_idx].strip()
-                else:
-                    logger.error("No data line found after X:")
-                    return None
-                
-                if data_line:
-                    values = [float(x.strip()) for x in data_line.split(',')]
-                    if len(values) != 13:
-                        logger.error(f"Sample data has {len(values)} values, expected 13")
-                        return None
-                    x_data = values
-                    break
-        
-        if x_data is None:
-            logger.error("Could not find X: data in sample-data.txt")
-            return None
-            
-        return x_data
-        
-    except FileNotFoundError:
-        logger.warning("sample-data.txt not found")
-        return None
-    except Exception as e:
-        logger.error(f"Error loading sample data: {e}")
-        return None
 
 
 @st.cache_resource
 def get_scaler():
-    """Load or create a StandardScaler for feature normalization"""
+    """Load the age scaler from pickle file"""
     try:
-        from sklearn.preprocessing import StandardScaler
-        from sklearn.datasets import load_wine
-        
-        # Load wine dataset to fit scaler
-        wine_data = load_wine()
-        scaler = StandardScaler()
-        scaler.fit(wine_data.data)
-        logger.info("Scaler fitted on wine dataset")
+        scaler_path = 'model/age_scaler.pkl'
+        if not os.path.exists(scaler_path):
+            logger.warning(f"Scaler file not found at {scaler_path}")
+            return None
+
+        with open(scaler_path, 'rb') as f:
+            scaler = pickle.load(f)
+        logger.info(f"Age scaler loaded from {scaler_path}")
         return scaler
     except Exception as e:
-        logger.warning(f"Could not create scaler: {e}")
+        logger.warning(f"Could not load scaler: {e}")
         return None
 
 
-def normalize_features(features: np.ndarray, scaler) -> np.ndarray:
-    """Normalize features using the provided scaler"""
-    if scaler is None:
-        return features
-    try:
-        return scaler.transform(features)
-    except Exception as e:
-        logger.warning(f"Normalization failed: {e}")
-        return features
+def normalize_features(feature_dict: dict, scaler) -> np.ndarray:
+    """
+    Normalize Age feature using the scaler and create feature array.
+    Returns array in correct order: Gender, Age, Drug, Mental, Indigenous, DV,
+    ACT, NSW, NT, QLD, SA, TAS, VIC, WA, SHS_Client
+    """
+    # Create feature array in correct order
+    features = []
+
+    # Gender
+    features.append(feature_dict['Gender'])
+
+    # Age (normalize if scaler available)
+    age = feature_dict['Age']
+    if scaler is not None:
+        try:
+            age_scaled = scaler.transform([[age]])[0][0]
+            features.append(age_scaled)
+        except Exception as e:
+            logger.warning(f"Age normalization failed: {e}, using raw value")
+            features.append(age)
+    else:
+        features.append(age)
+
+    # Binary risk factors
+    features.append(feature_dict['Drug'])
+    features.append(feature_dict['Mental'])
+    features.append(feature_dict['Indigenous'])
+    features.append(feature_dict['DV'])
+
+    # Location (one-hot encoded)
+    selected_location = feature_dict['Location']
+    for loc in LOCATION_FEATURES:
+        features.append(1 if loc == selected_location else 0)
+
+    # SHS_Client
+    features.append(feature_dict['SHS_Client'])
+
+    return np.array([features], dtype=float)
 
 
 def load_model() -> Optional[object]:
-    """Lazy-load Keras model"""
+    """Lazy-load Keras model for homelessness risk prediction"""
     try:
-        from model import ThreeClassFNN
         import tensorflow as tf
-        
-        model = ThreeClassFNN()
-        model.build((None, 13))
-        model.load_weights('model/wine.weights.h5')
-        logger.info("Weights loaded successfully")
-        
-        test_input = np.zeros((1, 13))
+        from tensorflow import keras
+        import h5py
+
+        # Try .keras file first (new format), then .h5 (old format)
+        model_paths = [
+            'model/homelessness_risk_model.keras',
+            'model/homelessness_risk_model.h5'
+        ]
+
+        model = None
+        for model_path in model_paths:
+            if os.path.exists(model_path):
+                try:
+                    # Check if it's actually an HDF5 file
+                    with h5py.File(model_path, 'r') as f:
+                        # If we can open it as HDF5, load with legacy method
+                        logger.info(f"Detected HDF5 format model at {model_path}")
+                        model = keras.models.load_model(model_path, compile=True)
+                        logger.info(f"Model loaded successfully from {model_path}")
+                        break
+                except OSError:
+                    # Not an HDF5 file, try as new Keras format
+                    try:
+                        model = keras.models.load_model(model_path)
+                        logger.info(f"Model loaded successfully from {model_path}")
+                        break
+                    except Exception as e:
+                        logger.warning(f"Could not load {model_path}: {e}")
+                        continue
+
+        if model is None:
+            logger.error("Could not find or load model file")
+            return None
+
+        # Warm up model
+        test_input = np.zeros((1, 15))
         _ = model.predict(test_input, verbose=0)
-        logger.info("Model loaded and warmed up successfully.")
+        logger.info("Model warmed up successfully")
         return model
     except Exception as exc:
         logger.error(f"Error loading model: {exc}", exc_info=True)
@@ -153,19 +156,20 @@ def get_model():
     return load_model()
 
 
-def predict_with_model(model, input_array: np.ndarray) -> np.ndarray:
-    """Predict using the provided model"""
-    return model.predict(input_array, verbose=0)
+def predict_with_model(model, input_array: np.ndarray) -> float:
+    """Predict using the provided model. Returns probability of homelessness."""
+    prediction = model.predict(input_array, verbose=0)
+    return float(prediction[0][0])
 
 
-def get_mock_prediction() -> np.ndarray:
+def get_mock_prediction() -> float:
     """Return deterministic mock predictions for demo/fallback"""
-    return np.array([[0.0, 1.0, 0.0]])  # 100% Class 1
+    return 0.5  # 50% probability
 
 
 # ---------- Streamlit UI ----------
 st.set_page_config(
-    page_title="Wine Classification AI",
+    page_title="Homelessness Risk Prediction",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -179,6 +183,22 @@ st.markdown("""
     }
     .prediction-box {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 2rem;
+        border-radius: 10px;
+        color: white;
+        text-align: center;
+        margin: 1rem 0;
+    }
+    .prediction-box-low {
+        background: linear-gradient(135deg, #56ab2f 0%, #a8e063 100%);
+        padding: 2rem;
+        border-radius: 10px;
+        color: white;
+        text-align: center;
+        margin: 1rem 0;
+    }
+    .prediction-box-high {
+        background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
         padding: 2rem;
         border-radius: 10px;
         color: white;
@@ -202,260 +222,259 @@ st.markdown("""
 
 # Header
 st.markdown("<div class='main-header'>", unsafe_allow_html=True)
-st.title("🍷 Wine Classification AI")
-st.markdown("*Powered by Deep Learning & Scikit-Learn*")
+st.title("🏠 Homelessness Risk Prediction")
+st.markdown("*Powered by TensorFlow & Scikit-Learn*")
 st.markdown("</div>", unsafe_allow_html=True)
 
 # Sidebar
 with st.sidebar:
     st.header("⚙️ Settings")
-    
-    # Normalization toggle
-    use_normalization = st.toggle(
-        "Use Feature Normalization",
-        value=True,
-        help="Normalize features using StandardScaler fitted on the Wine dataset"
-    )
-    
-    st.divider()
-    
+
     # Model status
     st.subheader("📊 Model Status")
     model = get_model()
-    scaler = get_scaler() if use_normalization else None
-    
+    scaler = get_scaler()
+
     if model is not None:
         st.success("✅ Model loaded")
     else:
         st.error("❌ Model unavailable")
-    
-    if use_normalization:
-        if scaler is not None:
-            st.success("✅ Scaler active")
-        else:
-            st.warning("⚠️ Scaler unavailable")
-    
+
+    if scaler is not None:
+        st.success("✅ Age scaler loaded")
+    else:
+        st.warning("⚠️ Age scaler unavailable")
+
     st.divider()
-    
+
     # Developer tools
     with st.expander("🔧 Developer Tools"):
         if st.button("Reload Model", use_container_width=True):
             st.cache_resource.clear()
             st.rerun()
-        
+
         st.code(f"Python {__import__('sys').version.split()[0]}")
-        
+
         # File system check
         st.write("**Files:**")
         st.write(f"📁 CWD: `{os.getcwd()}`")
-        st.write(f"{'✅' if os.path.exists('model.py') else '❌'} model.py")
-        st.write(f"{'✅' if os.path.exists('model/wine.weights.h5') else '❌'} wine.weights.h5")
-        
+        st.write(f"{'✅' if os.path.exists('model/homelessness_risk_model.h5') else '❌'} homelessness_risk_model.h5")
+        st.write(f"{'✅' if os.path.exists('model/homelessness_risk_model.keras') else '❌'} homelessness_risk_model.keras")
+        st.write(f"{'✅' if os.path.exists('model/age_scaler.pkl') else '❌'} age_scaler.pkl")
+
         # Show error if model failed
         if model is None and 'model_error' in st.session_state:
             with st.expander("Error Details"):
                 st.error(st.session_state['model_error'])
                 st.code(st.session_state['model_error_traceback'])
-    
+
     st.divider()
-    
+
     # Info
     with st.expander("ℹ️ About"):
         st.write("""
-        This app classifies wines into three categories based on chemical properties.
-        
+        This app predicts homelessness risk based on demographic and risk factors.
+
         **Features:**
-        - 13 chemical measurements
-        - Deep learning classification
-        - StandardScaler normalization
-        - Real-time predictions
+        - Gender, Age
+        - Risk factors: Drug use, Mental health, Indigenous status, Domestic violence
+        - Location (Australian state/territory)
+        - SHS client status
+        - Binary classification (at-risk vs not at-risk)
+        - Age normalization using StandardScaler
         """)
 
 # Main content area
 col_left, col_right = st.columns([2, 1])
 
 with col_left:
-    st.subheader("🔬 Wine Characteristics")
-    
-    # Quick test buttons
-    button_cols = st.columns(3)
-    with button_cols[0]:
-        if st.button("📋 Load Sample", use_container_width=True):
-            sample_data = load_sample_data()
-            if sample_data:
-                for i, value in enumerate(sample_data):
-                    st.session_state[f"feat_{i}"] = float(value)
-                st.rerun()
-            else:
-                st.error("Sample data file not found")
-    
-    with button_cols[1]:
-        if st.button("🔄 Reset All", use_container_width=True):
-            for i in range(len(WINE_FEATURES)):
-                st.session_state[f"feat_{i}"] = 0.0
-            st.rerun()
-    
-    with button_cols[2]:
-        if st.button("🎲 Random", use_container_width=True):
-            for i, feature in enumerate(WINE_FEATURES):
-                min_val, max_val = FEATURE_RANGES[feature]
-                st.session_state[f"feat_{i}"] = float(np.random.uniform(min_val, max_val))
-            st.rerun()
-    
-    st.divider()
-    
-    # Feature inputs with sliders
-    with st.form("wine_form"):
-        inputs = []
-        
+    st.subheader("👤 Individual Information")
+
+    # Feature inputs with form
+    with st.form("prediction_form"):
+        feature_dict = {}
+
         # Create tabs for organized input
-        tab1, tab2, tab3 = st.tabs(["🍇 Composition", "🎨 Color & Taste", "🧪 Advanced"])
-        
+        tab1, tab2 = st.tabs(["📋 Demographics", "⚠️ Risk Factors"])
+
         with tab1:
-            # First set of features
-            for i, feature in enumerate(WINE_FEATURES[:5]):
-                default_value = st.session_state.get(f"feat_{i}", 0.0)
-                min_val, max_val = FEATURE_RANGES[feature]
-                
-                value = st.slider(
-                    FEATURE_DESCRIPTIONS[feature],
-                    min_value=float(min_val),
-                    max_value=float(max_val),
-                    value=float(default_value),
-                    step=(max_val - min_val) / 100,
-                    format="%.2f"
-                )
-                inputs.append(value)
-        
+            st.write("**Basic Information**")
+
+            # Gender
+            gender_option = st.radio(
+                "Gender",
+                options=["Female", "Male"],
+                horizontal=True,
+                help="Select gender"
+            )
+            feature_dict['Gender'] = 1 if gender_option == "Male" else 0
+
+            # Age
+            age = st.number_input(
+                "Age",
+                min_value=0,
+                max_value=120,
+                value=30,
+                step=1,
+                help="Enter age in years"
+            )
+            feature_dict['Age'] = age
+
+            st.divider()
+
+            # Location
+            st.write("**Location**")
+            location = st.selectbox(
+                "Australian State/Territory",
+                options=LOCATION_FEATURES,
+                index=1,  # Default to NSW
+                help="Select the state or territory"
+            )
+            feature_dict['Location'] = location
+
         with tab2:
-            # Second set of features
-            for i, feature in enumerate(WINE_FEATURES[5:10], start=5):
-                default_value = st.session_state.get(f"feat_{i}", 0.0)
-                min_val, max_val = FEATURE_RANGES[feature]
-                
-                value = st.slider(
-                    FEATURE_DESCRIPTIONS[feature],
-                    min_value=float(min_val),
-                    max_value=float(max_val),
-                    value=float(default_value),
-                    step=(max_val - min_val) / 100,
-                    format="%.2f"
-                )
-                inputs.append(value)
-        
-        with tab3:
-            # Last set of features
-            for i, feature in enumerate(WINE_FEATURES[10:], start=10):
-                default_value = st.session_state.get(f"feat_{i}", 0.0)
-                min_val, max_val = FEATURE_RANGES[feature]
-                
-                value = st.slider(
-                    FEATURE_DESCRIPTIONS[feature],
-                    min_value=float(min_val),
-                    max_value=float(max_val),
-                    value=float(default_value),
-                    step=(max_val - min_val) / 100,
-                    format="%.2f"
-                )
-                inputs.append(value)
-        
-        submitted = st.form_submit_button("🎯 Classify Wine", use_container_width=True, type="primary")
+            st.write("**Risk Factors**")
+            st.caption("Select all that apply")
+
+            # Binary risk factors
+            feature_dict['Drug'] = 1 if st.checkbox(
+                "Drug Use",
+                help="Drug use risk factor"
+            ) else 0
+
+            feature_dict['Mental'] = 1 if st.checkbox(
+                "Mental Health Issues",
+                help="Mental health risk factor"
+            ) else 0
+
+            feature_dict['Indigenous'] = 1 if st.checkbox(
+                "Indigenous",
+                help="Indigenous status"
+            ) else 0
+
+            feature_dict['DV'] = 1 if st.checkbox(
+                "Domestic Violence",
+                help="Domestic violence risk factor"
+            ) else 0
+
+            st.divider()
+
+            st.write("**Service Information**")
+            feature_dict['SHS_Client'] = 1 if st.checkbox(
+                "SHS Client",
+                help="Currently receiving Specialist Homelessness Services"
+            ) else 0
+
+        submitted = st.form_submit_button("🎯 Predict Risk", use_container_width=True, type="primary")
 
 with col_right:
     st.subheader("📊 Results")
-    
+
     # Prediction results
     if submitted:
         try:
-            # Validate inputs
-            for i, (feature, value) in enumerate(zip(WINE_FEATURES, inputs)):
-                if not np.isfinite(value):
-                    st.error(f"Invalid value for {feature}")
-                    st.stop()
-            
-            # Prepare input
-            input_array = np.array([inputs], dtype=float)
-            logger.info(f"Raw input: {input_array}")
-            
-            # Normalize if enabled
-            if use_normalization and scaler is not None:
-                normalized_array = normalize_features(input_array, scaler)
-                logger.info(f"Normalized input: {normalized_array}")
-                prediction_input = normalized_array
-            else:
-                prediction_input = input_array
-            
+            # Prepare input array from feature dictionary
+            input_array = normalize_features(feature_dict, scaler)
+            logger.info(f"Feature input array shape: {input_array.shape}")
+            logger.info(f"Feature values: {input_array}")
+
             # Make prediction
             if model is None:
-                predictions = get_mock_prediction()
-                st.warning("⚠️ Using mock predictions")
+                risk_probability = get_mock_prediction()
+                st.warning("⚠️ Using mock predictions (model unavailable)")
             else:
-                predictions = predict_with_model(model, prediction_input)
-                logger.info(f"Predictions: {predictions}")
-            
-            predictions = np.asarray(predictions)
-            if predictions.ndim == 1:
-                predictions = predictions.reshape(1, -1)
-            
-            # Get results
-            predicted_class_index = int(np.argmax(predictions[0]))
-            predicted_class = WINE_CLASSES[predicted_class_index]
-            confidence = float(predictions[0][predicted_class_index])
-            
-            # Display prediction
+                risk_probability = predict_with_model(model, input_array)
+                logger.info(f"Risk probability: {risk_probability}")
+
+            # Determine risk level
+            risk_percentage = risk_probability * 100
+            is_high_risk = risk_probability > 0.5
+
+            # Display prediction with color coding
+            if risk_probability < 0.3:
+                box_class = "prediction-box-low"
+                risk_label = "Low Risk"
+                icon = "✅"
+            elif risk_probability < 0.7:
+                box_class = "prediction-box"
+                risk_label = "Moderate Risk"
+                icon = "⚠️"
+            else:
+                box_class = "prediction-box-high"
+                risk_label = "High Risk"
+                icon = "🚨"
+
             st.markdown(f"""
-            <div class='prediction-box'>
-                <h2>🎯 {predicted_class}</h2>
-                <h3>{confidence:.1%} Confidence</h3>
+            <div class='{box_class}'>
+                <h2>{icon} {risk_label}</h2>
+                <h3>{risk_percentage:.1f}% Risk Probability</h3>
             </div>
             """, unsafe_allow_html=True)
-            
-            # Probability visualization
-            st.write("**Class Probabilities:**")
-            
-            # Bar chart
+
+            # Risk visualization
+            st.write("**Risk Assessment:**")
+
+            # Progress bar for risk
+            st.progress(risk_probability, text=f"Homelessness Risk: {risk_percentage:.1f}%")
+
+            # Risk meter visualization
             import pandas as pd
-            prob_data = pd.DataFrame({
-                'Class': WINE_CLASSES,
-                'Probability': [float(predictions[0][i]) for i in range(len(WINE_CLASSES))]
+            risk_data = pd.DataFrame({
+                'Category': ['Not At Risk', 'At Risk'],
+                'Probability': [1 - risk_probability, risk_probability]
             })
-            st.bar_chart(prob_data.set_index('Class'), color='#667eea', height=200)
-            
-            # Progress bars
-            for i, class_name in enumerate(WINE_CLASSES):
-                prob = float(predictions[0][i])
-                st.progress(prob, text=f"{class_name}: {prob:.1%}")
-            
-            # Detailed metrics
+            st.bar_chart(risk_data.set_index('Category'), color='#667eea', height=200)
+
+            # Interpretation
+            st.write("**Interpretation:**")
+            if risk_probability < 0.3:
+                st.success("This individual shows a low probability of homelessness risk based on the provided factors.")
+            elif risk_probability < 0.7:
+                st.warning("This individual shows a moderate probability of homelessness risk. Consider preventive interventions.")
+            else:
+                st.error("This individual shows a high probability of homelessness risk. Immediate support services may be needed.")
+
+            # Detailed analysis
             with st.expander("📈 Detailed Analysis"):
                 st.json({
-                    "Predicted Class": predicted_class,
-                    "Confidence": f"{confidence:.4f}",
-                    "All Probabilities": {
-                        WINE_CLASSES[i]: f"{float(predictions[0][i]):.4f}"
-                        for i in range(len(WINE_CLASSES))
-                    },
-                    "Normalized": use_normalization
+                    "Risk Level": risk_label,
+                    "Risk Probability": f"{risk_probability:.4f}",
+                    "Risk Percentage": f"{risk_percentage:.2f}%",
+                    "Classification": "At Risk" if is_high_risk else "Not At Risk"
                 })
-                
+
                 # Feature summary
                 st.write("**Input Features:**")
-                st.dataframe({
-                    "Feature": [FEATURE_DESCRIPTIONS[f] for f in WINE_FEATURES],
-                    "Value": [f"{v:.2f}" for v in inputs]
-                }, use_container_width=True)
-        
+                feature_summary = {
+                    "Gender": "Male" if feature_dict['Gender'] == 1 else "Female",
+                    "Age": feature_dict['Age'],
+                    "Location": feature_dict['Location'],
+                    "Drug Use": "Yes" if feature_dict['Drug'] == 1 else "No",
+                    "Mental Health": "Yes" if feature_dict['Mental'] == 1 else "No",
+                    "Indigenous": "Yes" if feature_dict['Indigenous'] == 1 else "No",
+                    "Domestic Violence": "Yes" if feature_dict['DV'] == 1 else "No",
+                    "SHS Client": "Yes" if feature_dict['SHS_Client'] == 1 else "No"
+                }
+                st.json(feature_summary)
+
         except Exception as e:
             logger.exception("Prediction error")
             st.error(f"❌ Error: {str(e)}")
+            import traceback
+            with st.expander("Error Details"):
+                st.code(traceback.format_exc())
     else:
-        st.info("👈 Enter wine characteristics and click **Classify Wine** to get predictions")
-        
+        st.info("👈 Enter individual information and click **Predict Risk** to get results")
+
         # Show example
-        st.write("**Example Values:**")
+        st.write("**Example:**")
         st.code("""
-Alcohol: 13.2%
-Malic Acid: 2.3 g/L
-Ash: 2.4 g/L
-...
+Demographics:
+- Age: 30
+- Gender: Female
+- Location: NSW
+
+Risk Factors:
+- Mental Health Issues
+- SHS Client
         """)
