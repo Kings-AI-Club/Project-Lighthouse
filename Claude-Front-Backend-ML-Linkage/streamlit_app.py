@@ -10,7 +10,6 @@ import numpy as np
 import logging
 from typing import Optional, Tuple, Dict
 import os
-import pickle
 
 # Lightweight top-level config
 logging.basicConfig(level=logging.INFO)
@@ -27,10 +26,13 @@ FEATURE_NAMES = [
 BINARY_FEATURES = ['Gender', 'Drug', 'Mental', 'Indigenous', 'DV', 'SHS_Client']
 LOCATION_FEATURES = ['ACT', 'NSW', 'NT', 'QLD', 'SA', 'TAS', 'VIC', 'WA']
 
+# Age groups for one-hot encoding - MUST match training data
+AGE_GROUPS = ['0-17', '18-24', '25-34', '35-44', '45-54', '55-64', '65+']
+
 # Feature descriptions
 FEATURE_DESCRIPTIONS = {
     'Gender': 'Gender (0: Female, 1: Male)',
-    'Age': 'Age in years',
+    'Age': 'Age group',
     'Drug': 'Drug use risk factor',
     'Mental': 'Mental health risk factor',
     'Indigenous': 'Indigenous status',
@@ -40,61 +42,49 @@ FEATURE_DESCRIPTIONS = {
 }
 
 
-@st.cache_resource
-def get_scaler():
-    """Load the age scaler from pickle file"""
-    try:
-        scaler_path = 'model/age_scaler.pkl'
-        if not os.path.exists(scaler_path):
-            logger.warning(f"Scaler file not found at {scaler_path}")
-            return None
-
-        with open(scaler_path, 'rb') as f:
-            scaler = pickle.load(f)
-        logger.info(f"Age scaler loaded from {scaler_path}")
-        return scaler
-    except Exception as e:
-        logger.warning(f"Could not load scaler: {e}")
-        return None
+# No scaler needed - all features are binary/one-hot encoded
 
 
-def normalize_features(feature_dict: dict, scaler) -> np.ndarray:
+def create_feature_array(feature_dict: dict) -> np.ndarray:
     """
-    Normalize Age feature using the scaler and create feature array.
-    Returns array in correct order: Gender, Age, Drug, Mental, Indigenous, DV,
-    ACT, NSW, NT, QLD, SA, TAS, VIC, WA, SHS_Client
+    Create feature array with one-hot encoding for Age and Location.
+
+    Feature order matches training data:
+    - Gender (1 feature)
+    - Drug, Mental, Indigenous, DV (4 features)
+    - Location one-hot: ACT, NSW, NT, QLD, SA, TAS, VIC, WA (8 features)
+    - SHS_Client (1 feature)
+    - Age one-hot: 0-17, 18-24, 25-34, 35-44, 45-54, 55-64, 65+ (7 features)
+
+    Total: 21 features (all binary)
     """
-    # Create feature array in correct order
     features = []
 
-    # Gender
+    # Gender (1 feature)
     features.append(feature_dict['Gender'])
 
-    # Age (normalize if scaler available)
-    age = feature_dict['Age']
-    if scaler is not None:
-        try:
-            age_scaled = scaler.transform([[age]])[0][0]
-            features.append(age_scaled)
-        except Exception as e:
-            logger.warning(f"Age normalization failed: {e}, using raw value")
-            features.append(age)
-    else:
-        features.append(age)
-
-    # Binary risk factors
+    # Binary risk factors (4 features)
     features.append(feature_dict['Drug'])
     features.append(feature_dict['Mental'])
     features.append(feature_dict['Indigenous'])
     features.append(feature_dict['DV'])
 
-    # Location (one-hot encoded)
+    # Location one-hot encoded (8 features)
     selected_location = feature_dict['Location']
     for loc in LOCATION_FEATURES:
         features.append(1 if loc == selected_location else 0)
 
-    # SHS_Client
+    # SHS_Client (1 feature)
     features.append(feature_dict['SHS_Client'])
+
+    # Age one-hot encoded (7 features)
+    # Order: 0-17, 18-24, 25-34, 35-44, 45-54, 55-64, 65+
+    selected_age_group = feature_dict['Age']
+    for age_group in AGE_GROUPS:
+        features.append(1 if age_group == selected_age_group else 0)
+
+    logger.info(f"Created feature array with {len(features)} features")
+    logger.info(f"Age group '{selected_age_group}' one-hot encoded")
 
     return np.array([features], dtype=float)
 
@@ -137,10 +127,10 @@ def load_model() -> Optional[object]:
             logger.error("Could not find or load model file")
             return None
 
-        # Warm up model
-        test_input = np.zeros((1, 15))
+        # Warm up model with 21 features (all binary/one-hot encoded)
+        test_input = np.zeros((1, 21))
         _ = model.predict(test_input, verbose=0)
-        logger.info("Model warmed up successfully")
+        logger.info("Model warmed up successfully (21 features)")
         return model
     except Exception as exc:
         logger.error(f"Error loading model: {exc}", exc_info=True)
@@ -233,17 +223,12 @@ with st.sidebar:
     # Model status
     st.subheader("📊 Model Status")
     model = get_model()
-    scaler = get_scaler()
 
     if model is not None:
         st.success("✅ Model loaded")
+        st.info("ℹ️ Using one-hot encoding (no scaling required)")
     else:
         st.error("❌ Model unavailable")
-
-    if scaler is not None:
-        st.success("✅ Age scaler loaded")
-    else:
-        st.warning("⚠️ Age scaler unavailable")
 
     st.divider()
 
@@ -259,8 +244,6 @@ with st.sidebar:
         st.write("**Files:**")
         st.write(f"📁 CWD: `{os.getcwd()}`")
         st.write(f"{'✅' if os.path.exists('model/homelessness_risk_model.h5') else '❌'} homelessness_risk_model.h5")
-        st.write(f"{'✅' if os.path.exists('model/homelessness_risk_model.keras') else '❌'} homelessness_risk_model.keras")
-        st.write(f"{'✅' if os.path.exists('model/age_scaler.pkl') else '❌'} age_scaler.pkl")
 
         # Show error if model failed
         if model is None and 'model_error' in st.session_state:
@@ -276,12 +259,17 @@ with st.sidebar:
         This app predicts homelessness risk based on demographic and risk factors.
 
         **Features:**
-        - Gender, Age
+        - Gender, Age group (one-hot encoded)
         - Risk factors: Drug use, Mental health, Indigenous status, Domestic violence
-        - Location (Australian state/territory)
+        - Location (Australian state/territory, one-hot encoded)
         - SHS client status
         - Binary classification (at-risk vs not at-risk)
-        - Age normalization using StandardScaler
+        - All features are binary (no scaling required)
+
+        **Model:**
+        - 21 input features (all binary/one-hot encoded)
+        - Feedforward Neural Network
+        - Binary classification output
         """)
 
 # Main content area
@@ -309,16 +297,18 @@ with col_left:
             )
             feature_dict['Gender'] = 1 if gender_option == "Male" else 0
 
-            # Age
-            age = st.number_input(
-                "Age",
-                min_value=0,
-                max_value=120,
-                value=30,
-                step=1,
-                help="Enter age in years"
+            # Age Group
+            st.write("**Age Group**")
+            age_group = st.selectbox(
+                "Select age group",
+                options=AGE_GROUPS,
+                index=2,  # Default to 25-34
+                help="Age group of the individual (must match training data format)"
             )
-            feature_dict['Age'] = age
+            feature_dict['Age'] = age_group
+
+            # Show one-hot encoding info
+            st.caption(f"ℹ️ Age group will be one-hot encoded (7 binary features)")
 
             st.divider()
 
@@ -374,7 +364,7 @@ with col_right:
     if submitted:
         try:
             # Prepare input array from feature dictionary
-            input_array = normalize_features(feature_dict, scaler)
+            input_array = create_feature_array(feature_dict)
             logger.info(f"Feature input array shape: {input_array.shape}")
             logger.info(f"Feature values: {input_array}")
 
@@ -445,9 +435,10 @@ with col_right:
 
                 # Feature summary
                 st.write("**Input Features:**")
+                age_group = feature_dict['Age']
                 feature_summary = {
                     "Gender": "Male" if feature_dict['Gender'] == 1 else "Female",
-                    "Age": feature_dict['Age'],
+                    "Age Group": age_group,
                     "Location": feature_dict['Location'],
                     "Drug Use": "Yes" if feature_dict['Drug'] == 1 else "No",
                     "Mental Health": "Yes" if feature_dict['Mental'] == 1 else "No",
@@ -456,6 +447,10 @@ with col_right:
                     "SHS Client": "Yes" if feature_dict['SHS_Client'] == 1 else "No"
                 }
                 st.json(feature_summary)
+
+                # Show the feature array structure
+                st.write("**Feature Array (21 binary features):**")
+                st.code(f"Shape: {input_array.shape}\nValues: {input_array[0]}")
 
         except Exception as e:
             logger.exception("Prediction error")
@@ -470,7 +465,7 @@ with col_right:
         st.write("**Example:**")
         st.code("""
 Demographics:
-- Age: 30
+- Age Group: 25-34
 - Gender: Female
 - Location: NSW
 
