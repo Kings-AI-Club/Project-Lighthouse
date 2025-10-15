@@ -15,15 +15,14 @@ import os
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Feature definitions for homelessness risk model
-# Order: Gender, Age, Drug, Mental, Indigenous, DV, ACT, NSW, NT, QLD, SA, TAS, VIC, WA, SHS_Client
+# Feature definitions for homelessness risk model (20 features)
+# Order: Gender, Drug, Mental, Indigenous, DV, ACT, NSW, NT, QLD, SA, TAS, VIC, WA, Age one-hot (7)
 FEATURE_NAMES = [
     'Gender', 'Age', 'Drug', 'Mental', 'Indigenous', 'DV',
-    'ACT', 'NSW', 'NT', 'QLD', 'SA', 'TAS', 'VIC', 'WA',
-    'SHS_Client'
+    'ACT', 'NSW', 'NT', 'QLD', 'SA', 'TAS', 'VIC', 'WA'
 ]
 
-BINARY_FEATURES = ['Gender', 'Drug', 'Mental', 'Indigenous', 'DV', 'SHS_Client']
+BINARY_FEATURES = ['Gender', 'Drug', 'Mental', 'Indigenous', 'DV']
 LOCATION_FEATURES = ['ACT', 'NSW', 'NT', 'QLD', 'SA', 'TAS', 'VIC', 'WA']
 
 # Age groups for one-hot encoding - MUST match training data
@@ -37,8 +36,7 @@ FEATURE_DESCRIPTIONS = {
     'Mental': 'Mental health risk factor',
     'Indigenous': 'Indigenous status',
     'DV': 'Domestic violence risk factor',
-    'Location': 'Australian state/territory',
-    'SHS_Client': 'Specialist Homelessness Services client'
+    'Location': 'Australian state/territory'
 }
 
 
@@ -53,10 +51,9 @@ def create_feature_array(feature_dict: dict) -> np.ndarray:
     - Gender (1 feature)
     - Drug, Mental, Indigenous, DV (4 features)
     - Location one-hot: ACT, NSW, NT, QLD, SA, TAS, VIC, WA (8 features)
-    - SHS_Client (1 feature)
     - Age one-hot: 0-17, 18-24, 25-34, 35-44, 45-54, 55-64, 65+ (7 features)
 
-    Total: 21 features (all binary)
+    Total: 20 features (all binary)
     """
     features = []
 
@@ -73,9 +70,6 @@ def create_feature_array(feature_dict: dict) -> np.ndarray:
     selected_location = feature_dict['Location']
     for loc in LOCATION_FEATURES:
         features.append(1 if loc == selected_location else 0)
-
-    # SHS_Client (1 feature)
-    features.append(feature_dict['SHS_Client'])
 
     # Age one-hot encoded (7 features)
     # Order: 0-17, 18-24, 25-34, 35-44, 45-54, 55-64, 65+
@@ -127,10 +121,10 @@ def load_model() -> Optional[object]:
             logger.error("Could not find or load model file")
             return None
 
-        # Warm up model with 21 features (all binary/one-hot encoded)
-        test_input = np.zeros((1, 21))
+        # Warm up model with 20 features (all binary/one-hot encoded)
+        test_input = np.zeros((1, 20))
         _ = model.predict(test_input, verbose=0)
-        logger.info("Model warmed up successfully (21 features)")
+        logger.info("Model warmed up successfully (20 features)")
         return model
     except Exception as exc:
         logger.error(f"Error loading model: {exc}", exc_info=True)
@@ -262,12 +256,11 @@ with st.sidebar:
         - Gender, Age group (one-hot encoded)
         - Risk factors: Drug use, Mental health, Indigenous status, Domestic violence
         - Location (Australian state/territory, one-hot encoded)
-        - SHS client status
         - Binary classification (at-risk vs not at-risk)
         - All features are binary (no scaling required)
 
         **Model:**
-        - 21 input features (all binary/one-hot encoded)
+        - 20 input features (all binary/one-hot encoded)
         - Feedforward Neural Network
         - Binary classification output
         """)
@@ -349,11 +342,7 @@ with col_left:
 
             st.divider()
 
-            st.write("**Service Information**")
-            feature_dict['SHS_Client'] = 1 if st.checkbox(
-                "SHS Client",
-                help="Currently receiving Specialist Homelessness Services"
-            ) else 0
+            # (SHS Client field removed to match 20-feature model)
 
         submitted = st.form_submit_button("🎯 Predict Risk", use_container_width=True, type="primary")
 
@@ -374,7 +363,7 @@ with col_right:
                 st.warning("⚠️ Using mock predictions (model unavailable)")
             else:
                 risk_probability = predict_with_model(model, input_array)
-                logger.info(f"Risk probability: {risk_probability}")
+                logger.info(f"Confidence Score: {risk_probability}")
 
             # Determine risk level
             risk_percentage = risk_probability * 100
@@ -397,7 +386,7 @@ with col_right:
             st.markdown(f"""
             <div class='{box_class}'>
                 <h2>{icon} {risk_label}</h2>
-                <h3>{risk_percentage:.1f}% Risk Probability</h3>
+                <h3>{risk_percentage:.1f} Confidence Score</h3>
             </div>
             """, unsafe_allow_html=True)
 
@@ -428,7 +417,7 @@ with col_right:
             with st.expander("📈 Detailed Analysis"):
                 st.json({
                     "Risk Level": risk_label,
-                    "Risk Probability": f"{risk_probability:.4f}",
+                    "Confidence Score": f"{risk_probability:.4f}",
                     "Risk Percentage": f"{risk_percentage:.2f}%",
                     "Classification": "At Risk" if is_high_risk else "Not At Risk"
                 })
@@ -443,13 +432,12 @@ with col_right:
                     "Drug Use": "Yes" if feature_dict['Drug'] == 1 else "No",
                     "Mental Health": "Yes" if feature_dict['Mental'] == 1 else "No",
                     "Indigenous": "Yes" if feature_dict['Indigenous'] == 1 else "No",
-                    "Domestic Violence": "Yes" if feature_dict['DV'] == 1 else "No",
-                    "SHS Client": "Yes" if feature_dict['SHS_Client'] == 1 else "No"
+                    "Domestic Violence": "Yes" if feature_dict['DV'] == 1 else "No"
                 }
                 st.json(feature_summary)
 
                 # Show the feature array structure
-                st.write("**Feature Array (21 binary features):**")
+                st.write("**Feature Array (20 binary features):**")
                 st.code(f"Shape: {input_array.shape}\nValues: {input_array[0]}")
 
         except Exception as e:
@@ -471,5 +459,4 @@ Demographics:
 
 Risk Factors:
 - Mental Health Issues
-- SHS Client
         """)
