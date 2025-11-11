@@ -11,6 +11,8 @@ import logging
 from typing import Optional, Tuple, Dict
 import os
 
+from focal_loss import BinaryFocalLoss
+
 # Lightweight top-level config
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

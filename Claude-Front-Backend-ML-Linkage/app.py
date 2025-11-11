@@ -22,6 +22,8 @@ from model import ThreeClassFNN
 import numpy as np
 import logging
 
+from focal_loss import BinaryFocalLoss
+
 # Configure logging for debugging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
