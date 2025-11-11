@@ -86,13 +86,21 @@ def create_feature_array(feature_dict: dict) -> np.ndarray:
 
 
 def load_model() -> Optional[object]:
-    """Lazy-load Keras model for homelessness risk prediction"""
+    """Robust loader: try keras.load_model, else rebuild Sequential from model_config and load weights."""
     try:
+        import json
+        import h5py
         import tensorflow as tf
         from tensorflow import keras
-        import h5py
 
-        # Try .keras file first (new format), then .h5 (old format)
+        # Reduce GPU/threading interactions in Streamlit
+        try:
+            tf.config.set_visible_devices([], 'GPU')
+        except Exception:
+            pass
+        tf.config.threading.set_inter_op_parallelism_threads(1)
+        tf.config.threading.set_intra_op_parallelism_threads(1)
+
         model_paths = [
             'model/homelessness_risk_model.keras',
             'model/homelessness_risk_model.h5'
@@ -100,40 +108,146 @@ def load_model() -> Optional[object]:
 
         model = None
         for model_path in model_paths:
-            if os.path.exists(model_path):
+            if not os.path.exists(model_path):
+                logger.info(f"Model path not found: {model_path}")
+                continue
+
+            logger.info(f"Attempting to load model at: {model_path}")
+
+            # Try load_model with custom_objects only if ThreeClassFNN exists
+            custom_objs = {}
+            if 'ThreeClassFNN' in globals():
+                custom_objs['ThreeClassFNN'] = globals()['ThreeClassFNN']
+
+            # Always include InputLayer mapping to be safe
+            custom_objs['InputLayer'] = tf.keras.layers.InputLayer
+
+            try:
+                model = keras.models.load_model(model_path, compile=False, custom_objects=custom_objs)
+                model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+                logger.info(f"Model loaded with keras.models.load_model from {model_path}")
+                break
+            except Exception as e:
+                logger.warning(f"keras.models.load_model failed for {model_path}: {e}")
+
+            # If it's an HDF5 full model, try rebuilding Sequential programmatically and load weights
+            if model_path.endswith('.h5'):
                 try:
-                    # Check if it's actually an HDF5 file
                     with h5py.File(model_path, 'r') as f:
-                        # If we can open it as HDF5, load with legacy method
-                        logger.info(f"Detected HDF5 format model at {model_path}")
-                        model = keras.models.load_model(model_path, compile=True)
-                        logger.info(f"Model loaded successfully from {model_path}")
-                        break
-                except OSError:
-                    # Not an HDF5 file, try as new Keras format
-                    try:
-                        model = keras.models.load_model(model_path)
-                        logger.info(f"Model loaded successfully from {model_path}")
-                        break
-                    except Exception as e:
-                        logger.warning(f"Could not load {model_path}: {e}")
-                        continue
+                        if 'model_config' in f.attrs:
+                            raw_cfg = f.attrs['model_config']
+                            cfg = json.loads(raw_cfg)
+                            # Extract Sequential config if necessary
+                            if cfg.get('class_name') == 'Sequential' and 'config' in cfg:
+                                seq_cfg = cfg['config']
+                            else:
+                                seq_cfg = cfg
+
+                            layers_cfg = seq_cfg.get('layers', [])
+                            # We'll build a Sequential model by iterating layers_cfg and mapping class_name -> constructor
+                            seq_model = keras.Sequential(name=seq_cfg.get('name', 'sequential_rebuilt'))
+
+                            for layer in layers_cfg:
+                                cls = layer.get('class_name')
+                                layer_conf = layer.get('config', {})
+                                if cls == 'InputLayer':
+                                    # determine input shape
+                                    if 'batch_input_shape' in layer_conf:
+                                        input_shape = tuple([dim for dim in layer_conf['batch_input_shape']][1:])
+                                    elif 'batch_shape' in layer_conf:
+                                        input_shape = tuple([dim for dim in layer_conf['batch_shape']][1:])
+                                    else:
+                                        input_shape = (20,)
+                                    seq_model.add(keras.layers.InputLayer(input_shape=input_shape, name=layer_conf.get('name')))
+                                elif cls == 'Dense':
+                                    units = layer_conf.get('units')
+                                    activation = layer_conf.get('activation')
+                                    # kernel_regularizer may be dict with class_name L2
+                                    kernel_reg = None
+                                    kr = layer_conf.get('kernel_regularizer')
+                                    if isinstance(kr, dict) and kr.get('class_name') == 'L2':
+                                        kr_conf = kr.get('config', {})
+                                        l2_val = kr_conf.get('l2', None)
+                                        if l2_val:
+                                            kernel_reg = keras.regularizers.L2(l2_val)
+                                    # create Dense
+                                    seq_model.add(
+                                        keras.layers.Dense(
+                                            units,
+                                            activation=activation,
+                                            kernel_regularizer=kernel_reg,
+                                            name=layer_conf.get('name')
+                                        )
+                                    )
+                                elif cls == 'Dropout':
+                                    rate = layer_conf.get('rate', 0.0)
+                                    seq_model.add(keras.layers.Dropout(rate, name=layer_conf.get('name')))
+                                else:
+                                    # Unsupported layer in config: try to use from_config as fallback
+                                    try:
+                                        constructed = keras.layers.deserialize({'class_name': cls, 'config': layer_conf})
+                                        seq_model.add(constructed)
+                                    except Exception as ex:
+                                        logger.warning(f"Unknown layer {cls} - skipping or failing: {ex}")
+                                        raise
+
+                            # Now try loading weights into this programmatically-built model
+                            try:
+                                seq_model.load_weights(model_path)
+                                seq_model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+                                model = seq_model
+                                logger.info(f"Rebuilt Sequential model and loaded weights from {model_path}")
+                                break
+                            except Exception as e_weights:
+                                logger.warning(f"Failed to load weights into rebuilt Sequential: {e_weights}")
+                        else:
+                            logger.warning(f"No model_config attribute found in {model_path}")
+                except Exception as e:
+                    logger.warning(f"Error reading HDF5 {model_path}: {e}")
+
+            # Fallback: try constructing user's ThreeClassFNN and loading weights (works if h5 contains only weights)
+            if 'ThreeClassFNN' in globals():
+                try:
+                    temp = globals()['ThreeClassFNN']()
+                    temp.build((None, 20))
+                    temp.load_weights(model_path)
+                    temp.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+                    model = temp
+                    logger.info(f"Weights loaded into ThreeClassFNN from {model_path}")
+                    break
+                except Exception as e:
+                    logger.warning(f"ThreeClassFNN.load_weights failed for {model_path}: {e}")
+
+            # Last gasp: try default load_model without custom objects
+            try:
+                model = keras.models.load_model(model_path, compile=False)
+                model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+                logger.info(f"Model loaded (default) from {model_path}")
+                break
+            except Exception as e:
+                logger.warning(f"default load_model also failed for {model_path}: {e}")
 
         if model is None:
             logger.error("Could not find or load model file")
             return None
 
-        # Warm up model with 20 features (all binary/one-hot encoded)
-        test_input = np.zeros((1, 20))
-        _ = model.predict(test_input, verbose=0)
-        logger.info("Model warmed up successfully (20 features)")
+        # Warm up
+        try:
+            test_input = np.zeros((1, 20))
+            _ = model.predict(test_input, verbose=0)
+            logger.info("Model warmed up successfully (20 features)")
+        except Exception as e:
+            logger.warning(f"Model warm-up failed: {e}")
+
         return model
+
     except Exception as exc:
         logger.error(f"Error loading model: {exc}", exc_info=True)
         logger.warning("Running in demo mode - predictions will use mock data")
         st.session_state['model_error'] = str(exc)
         st.session_state['model_error_traceback'] = __import__('traceback').format_exc()
         return None
+
 
 
 @st.cache_resource
