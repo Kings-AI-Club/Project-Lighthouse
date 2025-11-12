@@ -1,97 +1,59 @@
-# 🍷 Wine Classification AI - Flask ML Application
+# Project-Lighthouse
 
-A comprehensive Flask-based web application that demonstrates machine learning model deployment with a complete frontend-backend architecture for wine classification.
+> A multi-application machine learning demonstration project by **Kings AI Club** showcasing practical ML deployment with Flask and Streamlit interfaces.
 
-## 🎯 Application Overview
+## Overview
 
-This application showcases a full-stack ML pipeline:
-- **Frontend**: Interactive HTML form with 13 wine characteristic inputs
-- **Backend**: Flask API that processes form data and serves ML predictions
-- **Model**: Pre-trained TensorFlow/Keras neural network for wine classification
-- **UI/UX**: Modern responsive design with real-time feedback
+Project-Lighthouse demonstrates production-ready machine learning applications through two distinct use cases:
+1. **Wine Classification** - Flask web application for classifying wines into quality categories
+2. **Homelessness Risk Prediction** - Streamlit application for predicting homelessness risk based on demographic factors
 
-## 🏗️ Architecture & Frontend-Backend Connections
+Each application showcases different ML deployment approaches, UI frameworks, and real-world problem-solving scenarios.
 
-### Key Connection Points
+---
 
-1. **Static File Serving** (`templates/index.html:12`)
-   ```html
-   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-   ```
-   - Flask automatically serves `static/style.css` via `url_for()` template function
-   - Ensures proper asset loading regardless of deployment environment
+## Applications
 
-2. **Dynamic Form Generation** (`templates/index.html:30-50`)
-   ```html
-   {% for feature in features %}
-   <input name="{{ feature }}" id="{{ feature }}" ...>
-   {% endfor %}
-   ```
-   - Backend `WINE_FEATURES` list (`app.py:51`) drives frontend form creation
-   - Jinja2 templating ensures form inputs match model expectations exactly
-   - Guarantees frontend-backend data contract compliance
+### 1. Wine Classification (Flask)
 
-3. **API Communication** (`templates/index.html:186-193`)
-   ```javascript
-   const response = await fetch('/predict', {
-       method: 'POST',
-       headers: { 'Content-Type': 'application/json' },
-       body: JSON.stringify(data)
-   });
-   ```
-   - Frontend JavaScript POSTs JSON data to Flask `/predict` endpoint
-   - Backend processes with `request.get_json()` (`app.py:98`)
-   - Seamless data flow from HTML form → JavaScript → Flask → ML model
+A full-stack Flask web application that classifies wines into three quality categories using a custom neural network.
 
-4. **Data Transformation Pipeline** (`app.py:110-122`)
-   ```python
-   input_features = []
-   for feature in WINE_FEATURES:
-       value = float(data[feature])  # Convert frontend strings to model floats
-       input_features.append(value)
-   input_array = np.array([input_features])  # Reshape for model input
-   ```
-   - Transforms frontend form data into ML model input format
-   - Handles type conversion and tensor reshaping
-   - Validates all required features are present
+#### Features
+- Interactive web form with 13 wine characteristic inputs
+- Real-time ML predictions with confidence scores
+- Responsive design with sample data pre-fill
+- RESTful API endpoint for predictions
+- Modern UI with probability visualization
 
-5. **Prediction Response** (`app.py:144-155`)
-   ```python
-   response_data = {
-       'predicted_class': predicted_class,
-       'confidence': confidence,
-       'all_probabilities': {...}
-   }
-   return jsonify(response_data)
-   ```
-   - Backend formats ML predictions as JSON for frontend consumption
-   - Frontend JavaScript displays results (`templates/index.html:208-235`)
-   - Complete round-trip: User Input → Model Prediction → Visual Results
+#### Tech Stack
+- **Backend**: Flask 3.1.2
+- **ML Framework**: TensorFlow 2.20.0, Keras 3.11.3
+- **Frontend**: HTML5, CSS3, JavaScript (Vanilla)
+- **Model**: Custom 4-layer FNN (ThreeClassFNN)
 
-## 🧪 Model Specifications
+#### Wine Features (13 inputs)
+```
+alcohol, malic_acid, ash, alcalinity_of_ash, magnesium,
+total_phenols, flavanoids, nonflavanoid_phenols, proanthocyanins,
+color_intensity, hue, od280/od315_of_diluted_wines, proline
+```
 
-### Input Features (13 wine characteristics):
-- `alcohol` - Alcohol content percentage
-- `malic_acid` - Malic acid concentration
-- `ash` - Ash content
-- `alcalinity_of_ash` - Alcalinity of ash
-- `magnesium` - Magnesium content
-- `total_phenols` - Total phenolic compounds
-- `flavanoids` - Flavanoid compounds
-- `nonflavanoid_phenols` - Non-flavanoid phenolic compounds
-- `proanthocyanins` - Proanthocyanin content
-- `color_intensity` - Color intensity measurement
-- `hue` - Hue measurement
-- `od280/od315_of_diluted_wines` - OD280/OD315 ratio of diluted wines
-- `proline` - Proline amino acid content
+#### Quick Start
+```bash
+# Activate virtual environment
+source .venv/bin/activate
 
-### Output Classes (3 wine categories):
-- `class_0` - Wine category 0
-- `class_1` - Wine category 1
-- `class_2` - Wine category 2
+# Run Flask application
+python app.py
 
-### Sample Input:
+# Access at http://localhost:8000
+```
+
+#### API Endpoint
+
+**POST `/predict`**
 ```json
+// Request
 {
   "alcohol": 14.23,
   "malic_acid": 1.71,
@@ -107,134 +69,8 @@ This application showcases a full-stack ML pipeline:
   "od280/od315_of_diluted_wines": 3.92,
   "proline": 1065
 }
-```
 
-## 🚀 Getting Started
-
-### Prerequisites
-- Python 3.8+
-- Virtual environment (included in project)
-- TensorFlow/Keras compatible system
-
-### Installation & Running
-
-1. **Activate Virtual Environment**
-   ```bash
-   source .venv/bin/activate
-   ```
-
-2. **Start the Application**
-   ```bash
-   python app.py
-   ```
-
-3. **Access the Application**
-   - Open browser to: `http://localhost:5000`
-   - Fill in wine characteristics or use "Fill Sample Data" button
-   - Click "Predict Wine Class" to get ML predictions
-
-## 📁 Project Structure
-
-```
-Flask-Backend-Test/
-├── app.py                 # Main Flask application with ML integration
-├── model/
-│   └── wine.keras        # Pre-trained TensorFlow/Keras model
-├── templates/
-│   └── index.html        # Frontend HTML with JavaScript
-├── static/
-│   └── style.css         # Responsive CSS styling
-├── .venv/                # Python virtual environment
-├── CLAUDE.md             # Development guidance for Claude Code
-└── README.md             # This documentation
-```
-
-## 🔧 Flask Mechanisms Explained
-
-### Route Handling
-- `@app.route('/')` - Serves HTML form interface
-- `@app.route('/predict', methods=['POST'])` - Processes ML predictions
-- Flask automatically maps URLs to Python functions
-
-### Template Rendering
-```python
-return render_template('index.html', features=WINE_FEATURES)
-```
-- `render_template()` uses Jinja2 engine to process HTML templates
-- Variables passed as arguments become available in templates
-- Enables dynamic content generation
-
-### JSON Processing
-```python
-data = request.get_json()        # Parse incoming JSON
-return jsonify(response_data)    # Return JSON response
-```
-- `request.get_json()` automatically parses JSON from frontend
-- `jsonify()` converts Python objects to JSON responses
-- Handles content-type headers automatically
-
-### Model Integration
-```python
-model = tf.keras.models.load_model('model/wine.keras')  # Load once at startup
-predictions = model.predict(input_array)               # Use for predictions
-```
-- Model loaded once during app initialization for efficiency
-- Predictions generated on-demand for each request
-- Error handling prevents crashes if model unavailable
-
-## 🎨 Frontend Features
-
-- **Responsive Design**: Works on desktop and mobile devices
-- **Real-time Validation**: Input validation with visual feedback
-- **Loading States**: Shows progress during backend processing
-- **Error Handling**: User-friendly error messages
-- **Sample Data**: Pre-filled example for quick testing
-- **Probability Visualization**: Animated bars showing prediction confidence
-
-## 🔍 Development Notes
-
-### Debugging
-- Flask runs in debug mode (`debug=True`) for development
-- Console logging shows request/response data flow
-- Browser developer tools show JavaScript console output
-
-### Extending the Model
-1. Replace `model/wine.keras` with your trained model
-2. Update `WINE_FEATURES` list in `app.py` to match new input features
-3. Update `WINE_CLASSES` list for different output categories
-4. Frontend form will automatically adapt to new features
-
-### Security Considerations
-- Input validation prevents invalid data submission
-- Error handling prevents sensitive information leakage
-- HTTPS recommended for production deployment
-
-## 🚀 Production Deployment
-
-For production use:
-1. Set `debug=False` in `app.run()`
-2. Use production WSGI server (Gunicorn, uWSGI)
-3. Add proper error logging
-4. Implement rate limiting for API endpoints
-5. Add authentication if needed
-
-## 📊 API Endpoints
-
-### GET `/`
-Returns the main HTML interface
-
-### POST `/predict`
-**Request Body:**
-```json
-{
-  "alcohol": 14.23,
-  "malic_acid": 1.71,
-  // ... all 13 wine features
-}
-```
-
-**Response:**
-```json
+// Response
 {
   "predicted_class": "class_1",
   "confidence": 0.85,
@@ -243,14 +79,411 @@ Returns the main HTML interface
     "class_1": 0.85,
     "class_2": 0.05
   },
-  "input_features": { /* echo of input data */ }
+  "input_features": { /* echo of inputs */ }
 }
 ```
 
-## 🤝 Contributing
+---
 
-This project demonstrates best practices for Flask-ML integration. Feel free to extend with additional features like:
-- Model comparison functionality
-- Batch prediction support
-- Historical prediction tracking
-- Advanced visualization options
+### 2. Homelessness Risk Prediction (Streamlit)
+
+An interactive Streamlit application that predicts homelessness risk based on demographic and social factors using synthetic data generated via Iterative Proportional Fitting (IPF).
+
+#### Features
+- Interactive sidebar with demographic inputs
+- Real-time risk assessment with visual indicators
+- Educational tool for understanding homelessness risk factors
+- One-hot encoded categorical variables (Location, Age groups)
+- Binary risk factor analysis
+
+#### Tech Stack
+- **Frontend/Backend**: Streamlit
+- **ML Framework**: TensorFlow 2.20.0, Keras 3.11.3
+- **Loss Function**: Focal Loss (for handling class imbalance)
+- **Model**: Feedforward Neural Network with L2 regularization
+
+#### Risk Factors (14 inputs)
+```
+Demographics:
+  - Gender (binary)
+  - Age (7 groups: 0-17, 18-24, 25-34, 35-44, 45-54, 55-64, 65+)
+
+Risk Indicators:
+  - Drug use
+  - Mental health
+  - Indigenous status
+  - Domestic violence
+
+Location (one-hot):
+  - ACT, NSW, NT, QLD, SA, TAS, VIC, WA
+```
+
+#### Quick Start
+```bash
+# Activate virtual environment
+source .venv/bin/activate
+
+# Run Streamlit application
+streamlit run streamlit_app.py
+
+# Access at http://localhost:8501
+```
+
+#### Model Architecture
+- **Input Layer**: 20 features (after one-hot encoding)
+- **Hidden Layers**: 64 → 32 → 16 neurons with ReLU activation
+- **Regularization**: L2 regularization + Dropout (30%, 20%)
+- **Output**: Binary classification (homeless/not homeless)
+- **Training**: Early stopping, learning rate reduction, stratified splits
+
+---
+
+## Project Structure
+
+```
+Project-Lighthouse/
+├── app.py                          # Flask application for wine classification
+├── streamlit_app.py                # Streamlit app for homelessness prediction
+├── model.py                        # ThreeClassFNN model definition
+├── focal_loss.py                   # Focal loss implementation
+├── model/
+│   ├── wine.weights.h5            # Wine classification model weights
+│   └── homelessness_risk_model.h5 # Homelessness prediction model
+├── templates/
+│   └── index.html                 # Flask frontend template
+├── static/
+│   └── style.css                  # CSS styling for Flask app
+├── sample-data.txt                # Sample wine data for testing
+├── .venv/                         # Python virtual environment
+├── CLAUDE.md                      # AI assistant development guide
+├── LICENSE                        # Project license
+└── README.md                      # This file
+```
+
+---
+
+## Installation & Setup
+
+### Prerequisites
+- Python 3.8 or higher
+- pip package manager
+- 2GB RAM minimum (for TensorFlow)
+
+### Virtual Environment Setup
+
+The project includes a pre-configured virtual environment in `.venv/`:
+
+```bash
+# Activate the virtual environment
+source .venv/bin/activate  # On macOS/Linux
+# OR
+.venv\Scripts\activate     # On Windows
+```
+
+### Dependencies
+
+Key packages (installed in `.venv/`):
+- Flask 3.1.2
+- TensorFlow 2.20.0
+- Keras 3.11.3
+- Streamlit (for homelessness app)
+- NumPy 2.3.3
+- focal-loss 0.0.7
+
+To verify installation:
+```bash
+pip list | grep -E "Flask|tensorflow|streamlit|keras"
+```
+
+---
+
+## Usage Examples
+
+### Wine Classification Example
+
+**Using the Web Interface:**
+1. Navigate to `http://localhost:8000`
+2. Click "Fill Sample Data" for pre-populated values
+3. Adjust any wine characteristics as needed
+4. Click "Predict Wine Class"
+5. View prediction results with confidence scores
+
+**Using the API:**
+```bash
+curl -X POST http://localhost:8000/predict \
+  -H "Content-Type: application/json" \
+  -d @sample-data.txt
+```
+
+### Homelessness Risk Prediction Example
+
+1. Navigate to `http://localhost:8501` (after running Streamlit)
+2. Select demographic information in the sidebar:
+   - Gender
+   - Age group
+   - Location (Australian state)
+3. Toggle risk factors:
+   - Drug use
+   - Mental health issues
+   - Indigenous status
+   - Domestic violence
+4. View real-time risk prediction with probability score
+
+---
+
+## Model Details
+
+### Wine Classification Model (ThreeClassFNN)
+
+```python
+Architecture:
+  Input(13) → Dense(32, ReLU) → Dropout(0.3) →
+  Dense(32, ReLU) → Dropout(0.3) →
+  Dense(32, ReLU) → Dropout(0.3) →
+  Dense(32, ReLU) → Softmax(3)
+
+Optimizer: Adam
+Loss: Categorical Cross-Entropy
+Metrics: Accuracy
+```
+
+### Homelessness Risk Model
+
+```python
+Architecture:
+  Input(20) → Dense(64, ReLU, L2) → Dropout(0.3) →
+  Dense(32, ReLU, L2) → Dropout(0.2) →
+  Dense(16, ReLU) → Sigmoid(1)
+
+Optimizer: Adam (legacy, lr=0.001)
+Loss: Binary Focal Loss
+Metrics: Accuracy, AUC
+Training: Early stopping + LR reduction
+```
+
+**Training Data**: Synthetic data generated using IPF (Iterative Proportional Fitting) to match realistic demographic patterns while maintaining privacy.
+
+---
+
+## Development
+
+### Running in Development Mode
+
+Both applications run in debug/development mode by default:
+
+```bash
+# Flask (debug=True, auto-reload enabled)
+python app.py
+
+# Streamlit (watch mode enabled)
+streamlit run streamlit_app.py
+```
+
+### Logging
+
+Both applications use Python's `logging` module:
+- Flask: Logs requests, predictions, and errors to console
+- Streamlit: Logs model loading and prediction events
+
+### Extending the Models
+
+**To add new wine features:**
+1. Update `WINE_FEATURES` list in `app.py:61-65`
+2. Retrain model with new input dimension
+3. Update frontend form (auto-generates from `WINE_FEATURES`)
+
+**To modify homelessness risk factors:**
+1. Update feature lists in `streamlit_app.py:22-28`
+2. Adjust `create_feature_array()` function
+3. Retrain model with new architecture
+
+---
+
+## Architecture Notes
+
+### Flask Application Architecture
+
+```
+User Browser
+    ↓
+HTML Form (templates/index.html)
+    ↓ [JavaScript fetch()]
+Flask Route: POST /predict (app.py:89)
+    ↓
+Data Validation & Transformation
+    ↓
+ThreeClassFNN.predict()
+    ↓
+JSON Response → Frontend Display
+```
+
+**Key Connection Points:**
+- **Template Rendering**: Jinja2 engine generates HTML with Python data
+- **Static Files**: Flask serves CSS/JS via `url_for('static', ...)`
+- **API Communication**: JavaScript `fetch()` ↔ Flask `request.get_json()`
+- **Model Integration**: Loaded once at startup, used for all predictions
+
+### Streamlit Application Architecture
+
+```
+Streamlit Frontend (Auto-generated)
+    ↓
+User Inputs (Sidebar widgets)
+    ↓ [st.session_state]
+Feature Engineering (one-hot encoding)
+    ↓
+Model Prediction (cached)
+    ↓
+Real-time UI Update (st.write, st.metric)
+```
+
+**Key Features:**
+- **Session State**: Maintains model in memory across reruns
+- **Caching**: `@st.cache_resource` prevents model reloading
+- **Reactive**: UI updates automatically on input change
+- **No API**: Direct Python function calls (no REST layer)
+
+---
+
+## Production Deployment
+
+### Flask Application
+
+**Recommended Setup:**
+```bash
+# Use production WSGI server
+pip install gunicorn
+
+# Run with gunicorn (4 workers)
+gunicorn -w 4 -b 0.0.0.0:8000 app:app
+
+# Or with uWSGI
+uwsgi --http :8000 --wsgi-file app.py --callable app
+```
+
+**Production Checklist:**
+- [ ] Set `debug=False` in `app.run()`
+- [ ] Use HTTPS/TLS certificates
+- [ ] Implement rate limiting (Flask-Limiter)
+- [ ] Add request logging (Flask-Logging)
+- [ ] Set up monitoring (Sentry, DataDog)
+- [ ] Configure environment variables for secrets
+- [ ] Enable CORS if needed (Flask-CORS)
+
+### Streamlit Application
+
+**Deployment Options:**
+1. **Streamlit Cloud** (Recommended for quick deployment)
+   ```bash
+   # Push to GitHub, deploy via streamlit.io/cloud
+   ```
+
+2. **Docker Container**
+   ```dockerfile
+   FROM python:3.9
+   WORKDIR /app
+   COPY . .
+   RUN pip install -r requirements.txt
+   CMD ["streamlit", "run", "streamlit_app.py"]
+   ```
+
+3. **Custom Server**
+   ```bash
+   streamlit run streamlit_app.py --server.port 8501 --server.address 0.0.0.0
+   ```
+
+---
+
+## Security Considerations
+
+### Input Validation
+- Flask app validates all 13 wine features are present and numeric
+- Streamlit enforces input types via widget constraints
+- Both apps sanitize inputs before model inference
+
+### Error Handling
+- Flask returns appropriate HTTP status codes (400, 500)
+- Sensitive error details hidden in production
+- Fallback to mock predictions if model unavailable
+
+### Model Security
+- Models loaded from local filesystem (no remote fetch)
+- No user-uploaded models accepted
+- Prediction inputs bounded by frontend validation
+
+---
+
+## Educational Use Cases
+
+This project is ideal for:
+- **ML Engineering Students**: Learn Flask/Streamlit deployment patterns
+- **Data Science Courses**: Understand model serving architecture
+- **Web Development**: See frontend-backend ML integration
+- **Social Impact Research**: Explore homelessness risk modeling
+
+---
+
+## Contributing
+
+This is a Kings AI Club educational project. Contributions welcome!
+
+### Development Workflow
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make changes and test locally
+4. Commit with clear messages (`git commit -m 'Add amazing feature'`)
+5. Push to branch (`git push origin feature/amazing-feature`)
+6. Open a Pull Request
+
+### Code Style
+- Follow PEP 8 for Python code
+- Add docstrings to functions
+- Include logging for debugging
+- Update README for new features
+
+---
+
+## License
+
+This project is licensed under the terms specified in the [LICENSE](LICENSE) file.
+
+---
+
+## Acknowledgments
+
+- **Kings AI Club** - Project development and maintenance
+- **UCI Machine Learning Repository** - Wine dataset inspiration
+- **Synthetic Data Generation** - IPF methodology for homelessness data
+- **TensorFlow/Keras Team** - ML framework support
+- **Flask & Streamlit Communities** - Web framework documentation
+
+---
+
+## Support & Contact
+
+For questions, issues, or contributions:
+- **Repository**: [Kings-AI-Club/Project-Lighthouse](https://github.com/Kings-AI-Club/Project-Lighthouse)
+- **Issues**: Use GitHub Issues for bug reports and feature requests
+- **Documentation**: See `CLAUDE.md` for AI-assisted development guidance
+
+---
+
+## Version History
+
+### Current Version
+- Flask wine classification with custom ThreeClassFNN
+- Streamlit homelessness risk prediction
+- Focal loss for handling class imbalance
+- Comprehensive documentation and examples
+
+### Future Roadmap
+- [ ] Add model performance metrics dashboard
+- [ ] Implement user authentication
+- [ ] Create REST API for homelessness model
+- [ ] Add data visualization for feature importance
+- [ ] Deploy both apps to cloud platforms
+- [ ] Create Docker compose for local development
+
+---
+
+**Built with ❤️ by Kings AI Club**
